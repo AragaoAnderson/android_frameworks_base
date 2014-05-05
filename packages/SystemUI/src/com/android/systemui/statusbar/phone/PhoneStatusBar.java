@@ -165,8 +165,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
     public static final String ACTION_STATUSBAR_START
             = "com.android.internal.policy.statusbar.START";
 
-    public static final String MODLOCK_STATE
-             = "com.android.keyguard.modlock.STATE";
+    public static final String CUSTOM_LOCKSCREEN_STATE
+            = "com.android.keyguard.custom.STATE";
 
     private static final int MSG_OPEN_NOTIFICATION_PANEL = 1000;
     private static final int MSG_CLOSE_PANELS = 1001;
@@ -206,6 +206,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
 
     PhoneStatusBarPolicy mIconPolicy;
 
+    private boolean mUseCenterClock = false;
+
     // These are no longer handled by the policy, because we need custom strategies for them
     BluetoothController mBluetoothController;
     BatteryController mBatteryController;
@@ -231,7 +233,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
     Object mQueueLock = new Object();
 
     // viewgroup containing the normal contents of the statusbar
-    LinearLayout mStatusBarContents;
+    ViewGroup mStatusBarContents;
 
     // right-hand icons
     LinearLayout mSystemIconArea;
@@ -446,6 +448,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
                     UserHandle.USER_ALL);
             resolver.registerContentObserver(Settings.System.getUriFor(
                     Settings.System.STATUS_BAR_CARRIER), false, this);
+            resolver.registerContentObserver(Settings.System.getUriFor(
+                    Settings.System.STATUS_BAR_CENTER_CLOCK), false, this);
             updateSettings();
         }
 
@@ -886,7 +890,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
                     R.layout.msim_super_status_bar, null);
         } else {
             mStatusBarWindow = (StatusBarWindowView) View.inflate(context,
-                    R.layout.super_status_bar, null);
+                    mUseCenterClock ? R.layout.super_status_bar_center_clock : R.layout.super_status_bar,
+                    null);
         }
         mStatusBarWindow.mService = this;
         mStatusBarWindow.setOnTouchListener(new View.OnTouchListener() {
@@ -985,7 +990,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
         mNotificationIcons = (IconMerger)mStatusBarView.findViewById(R.id.notificationIcons);
         mMoreIcon = mStatusBarView.findViewById(R.id.moreIcon);
         mNotificationIcons.setOverflowIndicator(mMoreIcon);
-        mStatusBarContents = (LinearLayout)mStatusBarView.findViewById(R.id.status_bar_contents);
+        mStatusBarContents = (ViewGroup)mStatusBarView.findViewById(R.id.status_bar_contents);
         mTickerView = mStatusBarView.findViewById(R.id.ticker);
 
         mPile = (NotificationRowLayout)mStatusBarWindow.findViewById(R.id.latestItems);
@@ -1290,7 +1295,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
         filter.addAction(Intent.ACTION_SCREEN_ON);
         filter.addAction(ACTION_DEMO);
         filter.addAction(SCHEDULE_REMINDER_NOTIFY);
-        filter.addAction(MODLOCK_STATE);
+        filter.addAction(CUSTOM_LOCKSCREEN_STATE);
         context.registerReceiver(mBroadcastReceiver, filter);
 
         // listen for USER_SETUP_COMPLETE setting (per-user)
@@ -3496,7 +3501,7 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
                     }
                 }
             }
-            else if (MODLOCK_STATE.equals(action)) {
+            else if (CUSTOM_LOCKSCREEN_STATE.equals(action)) {
                 boolean showing = intent.getBooleanExtra("showing", false);
                 if (null != mNavigationBarView) {
                     mNavigationBarView.getBarTransitions().applyTransparent(showing);
@@ -3635,6 +3640,13 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             }
             enableOrDisableReminder();
         }
+
+        boolean useCenterClock = Settings.System.getInt(
+                resolver, Settings.System.STATUS_BAR_CENTER_CLOCK, 0) == 1;
+        if (mUseCenterClock != useCenterClock) {
+            mUseCenterClock = useCenterClock;
+            recreateStatusBar();
+        }
     }
 
     private void resetUserSetupObserver() {
@@ -3705,6 +3717,8 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
             iconSlots.add(iconView.getStatusBarSlot());
         }
 
+        removeAllViews(mStatusBarWindow);
+
         // extract notifications.
         int nNotifs = mNotificationData.size();
         ArrayList<Pair<IBinder, StatusBarNotification>> notifications =
@@ -3740,6 +3754,17 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
 
         updateExpandedViewPos(EXPANDED_LEAVE_ALONE);
         mRecreating = false;
+    }
+
+    private void removeAllViews(ViewGroup parent) {
+        int N = parent.getChildCount();
+        for (int i = 0; i < N; i++) {
+            View child = parent.getChildAt(i);
+            if (child instanceof ViewGroup) {
+                removeAllViews((ViewGroup) child);
+            }
+        }
+        parent.removeAllViews();
     }
 
     /**
@@ -4078,6 +4103,10 @@ public class PhoneStatusBar extends BaseStatusBar implements DemoMode,
 
             cr.registerContentObserver(
                     Settings.System.getUriFor(Settings.System.QS_DYNAMIC_DOCK_BATTERY),
+                    false, this, UserHandle.USER_ALL);
+
+            cr.registerContentObserver(
+                    Settings.System.getUriFor(Settings.System.QS_DYNAMIC_EQUALIZER),
                     false, this, UserHandle.USER_ALL);
 
             cr.registerContentObserver(
